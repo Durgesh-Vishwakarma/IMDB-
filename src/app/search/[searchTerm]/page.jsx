@@ -1,18 +1,23 @@
-import Results from '@/components/Results';
+import SearchResultsClient from "@/components/SearchResultsClient";
+import { searchMovies } from "@/lib/tmdb";
+
+export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }) {
+  const term = decodeURIComponent(params.searchTerm || "");
+  return {
+    title: `Search: ${term}`,
+    description: `Browse movie search results for "${term}" — powered by the TMDB API.`,
+  };
+}
 
 export default async function SearchPage({ params }) {
-  const seachTerm = params.searchTerm;
-  const res = await fetch(
-    `https://api.themoviedb.org/3/search/movie?api_key=${process.env.API_KEY}&query=${seachTerm}&language=en-US&page=1&include_adult=false`
-  );
-  const data = await res.json();
-  const results = data.results;
+  const searchTerm = params.searchTerm;
+  const results = await searchMovies(searchTerm);
+
   return (
     <div>
-      {results &&
-        results.length ===
-        <h1 className='text-center pt-6'>No results found</h1>}
-      {results && <Results results={results} />}
+      <SearchResultsClient searchTerm={searchTerm} initialResults={results} />
     </div>
   );
 }

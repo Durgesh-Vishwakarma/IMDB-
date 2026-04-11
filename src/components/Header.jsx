@@ -1,25 +1,36 @@
-import { AiFillHome } from "react-icons/ai";
-import { BsFillInfoCircleFill } from "react-icons/bs";
 import Menuitem from "./Menuitem";
 import Link from "next/link";
 import DarkMode from "./DarkMode";
+import { MdLocalMovies } from "react-icons/md";
 
 export default function Header() {
   return (
-    <div className="flex justify-between items-center p-3 max-w-6xl mx-auto">
-      <div className="flex gap-4">
-        <Menuitem title="home" address="/" Icon={AiFillHome} />
-        <Menuitem title="about" address="about" Icon={BsFillInfoCircleFill} />
-      </div>
-      <div className="flex items-center gap-4">
-        <DarkMode />
-        <Link href={"/"} className="flex gap-1 items-center">
-          <span className="text-2xl font-bold  dark:bg-red-700 bg-yellow-400 py-1 px-2 rounded-lg">
-            IMDB
-          </span>
-          <span className="text-xl hidden sm:inline">website</span>
+    <header className="sticky top-0 z-40 border-b border-slate-200/60 bg-white/80 backdrop-blur-xl dark:border-slate-800/60 dark:bg-slate-950/80">
+      <div className="page-shell flex items-center justify-between py-3">
+        {/* Logo */}
+        <Link href="/" className="group flex items-center gap-2.5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 shadow-lg shadow-amber-500/25 transition-transform duration-200 group-hover:scale-105">
+            <MdLocalMovies className="text-xl text-white" />
+          </div>
+          <div className="flex flex-col leading-none">
+            <span className="text-base font-black tracking-tight text-slate-900 dark:text-white">
+              Movie<span className="text-amber-500">Hub</span>
+            </span>
+            <span className="hidden text-[10px] font-medium uppercase tracking-widest text-slate-400 sm:block">
+              Powered by TMDB
+            </span>
+          </div>
         </Link>
+
+        {/* Nav links */}
+        <nav className="flex items-center gap-1">
+          <Menuitem title="Home" address="/" iconName="home" />
+          <Menuitem title="About" address="/about" iconName="about" />
+        </nav>
+
+        {/* Dark mode */}
+        <DarkMode />
       </div>
-    </div>
+    </header>
   );
 }
