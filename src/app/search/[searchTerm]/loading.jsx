@@ -1,14 +1,17 @@
 import CardSkeleton from "@/components/CardSkeleton";
 
-export default function SearchLoading() {
+export default function Loading() {
   return (
-    <div className="page-shell py-6">
-      <div className="mb-5 h-4 w-48 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+    <div className="shell py-10">
+      <div className="skeleton h-9 w-64 rounded-lg" />
+      <div className="skeleton mt-3 h-4 w-32 rounded-full" />
+      <ul className="mt-8 grid grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
         {Array.from({ length: 12 }).map((_, i) => (
-          <CardSkeleton key={i} />
+          <li key={i}>
+            <CardSkeleton />
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }

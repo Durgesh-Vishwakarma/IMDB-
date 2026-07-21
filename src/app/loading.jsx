@@ -1,21 +1,21 @@
 import CardSkeleton from "@/components/CardSkeleton";
 
-// Next.js automatically renders this file while the page is loading
 export default function Loading() {
   return (
-    <div className="page-shell py-6">
-      {/* Section header shimmer */}
-      <div className="mb-5 flex items-center gap-3">
-        <div className="h-5 w-32 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
-        <div className="h-px flex-1 bg-slate-100 dark:bg-slate-800" />
+    <div className="shell py-16">
+      <div className="skeleton h-14 w-full max-w-2xl rounded-lg" />
+      <div className="mt-5 space-y-2">
+        <div className="skeleton h-4 w-full max-w-lg rounded-full" />
+        <div className="skeleton h-4 w-2/3 max-w-sm rounded-full" />
       </div>
-
-      {/* Card grid skeleton */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-        {Array.from({ length: 18 }).map((_, i) => (
-          <CardSkeleton key={i} />
+      <div className="skeleton mt-8 h-14 w-full max-w-xl rounded-full" />
+      <ul className="mt-14 grid grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <li key={i}>
+            <CardSkeleton />
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }

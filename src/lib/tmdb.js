@@ -1,3 +1,5 @@
+import { DECADES, SORTS } from "./genres";
+
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const API_KEY = process.env.API_KEY;
 
@@ -51,6 +53,12 @@ async function fetchFromTmdb(
       const response = await fetch(buildUrl(path, query), fetchOptions);
 
       if (!response.ok) {
+        // 404 is a real answer, not a failure — let callers handle notFound().
+        if (response.status === 404) {
+          const err = new Error("TMDB resource not found");
+          err.status = 404;
+          throw err;
+        }
         // 429 = rate-limited: back off and retry
         if (response.status === 429 && attempt < MAX_RETRIES) {
           const retryAfter = Number(response.headers.get("Retry-After") ?? 1);
@@ -68,7 +76,7 @@ async function fetchFromTmdb(
       if (!isRetryable(err)) throw err;
 
       if (attempt < MAX_RETRIES) {
-        // Exponential back-off: 300ms, 900ms
+        // Exponential back-off: 300ms, 1200ms
         await sleep(300 * attempt ** 2);
       }
     }
@@ -79,120 +87,227 @@ async function fetchFromTmdb(
   );
 }
 
-// Maps decade string → [gte, lte] date strings for TMDB discover
+/** Maps a decade id ("1990s") to TMDB primary_release_date bounds. */
 function decadeToDates(decade) {
-  const ranges = {
-    "2020s": ["2020-01-01", "2029-12-31"],
-    "2010s": ["2010-01-01", "2019-12-31"],
-    "2000s": ["2000-01-01", "2009-12-31"],
-    "1990s": ["1990-01-01", "1999-12-31"],
-    "1980s": ["1980-01-01", "1989-12-31"],
-    "1970s": ["1970-01-01", "1979-12-31"],
-  };
-  return ranges[decade] || null;
+  if (!decade || decade === "all") return null;
+  const start = Number(String(decade).slice(0, 4));
+  if (!DECADES.some((d) => d.id === decade) || Number.isNaN(start)) return null;
+  return [`${start}-01-01`, `${start + 9}-12-31`];
 }
 
-export async function getMoviesByGenre(
-  genre = "fetchTrending",
-  year = "all",
-  page = 1,
-) {
-  const safePage = Math.max(1, Number(page) || 1);
-  const dates = year && year !== "all" ? decadeToDates(year) : null;
+function tmdbSort(sortId) {
+  return SORTS.find((s) => s.id === sortId)?.tmdb ?? SORTS[0].tmdb;
+}
 
-  // If a year filter is active on trending/top_rated, switch to discover
-  // so we can apply date constraints (those endpoints ignore date params).
-  const forcedDiscover =
-    dates && (genre === "fetchTrending" || genre === "fetchTopRated");
-
-  let path = "/trending/all/week";
-  let query = {};
-
-  if (forcedDiscover) {
-    path = "/discover/movie";
-    query = {
-      sort_by:
-        genre === "fetchTopRated" ? "vote_average.desc" : "popularity.desc",
-      "vote_count.gte": genre === "fetchTopRated" ? "200" : "50",
-      "primary_release_date.gte": dates[0],
-      "primary_release_date.lte": dates[1],
-      page: safePage,
-    };
-  } else if (genre === "fetchTopRated") {
-    path = "/movie/top_rated";
-    query = { page: safePage };
-  } else if (genre !== "fetchTrending" && !isNaN(Number(genre))) {
-    path = "/discover/movie";
-    query = {
-      with_genres: genre,
-      sort_by: "popularity.desc",
-      page: safePage,
-      ...(dates && {
-        "primary_release_date.gte": dates[0],
-        "primary_release_date.lte": dates[1],
-      }),
-    };
-  }
-  // Note: /trending/all/week doesn't support pagination — always returns page 1.
-
-  const data = await fetchFromTmdb(path, { query, revalidate: 300 });
+function normalizeList(data, page) {
   return {
     results: data.results || [],
     totalPages: Math.min(data.total_pages || 1, 500), // TMDB caps at 500
-    currentPage: safePage,
+    totalResults: data.total_results || 0,
+    currentPage: page,
   };
 }
 
-export async function getMovieById(id) {
-  return fetchFromTmdb(`/movie/${id}`, { revalidate: 86400 });
+/**
+ * Discover movies within a genre, optionally constrained by decade and sort.
+ * Used by every /genre/<slug> page.
+ */
+export async function getMoviesByGenreId(
+  genreId,
+  { decade = "all", sort = "popular", page = 1 } = {},
+) {
+  const safePage = Math.max(1, Math.min(Number(page) || 1, 500));
+  const dates = decadeToDates(decade);
+  const sortBy = tmdbSort(sort);
+
+  const query = {
+    with_genres: String(genreId),
+    sort_by: sortBy,
+    page: String(safePage),
+    include_adult: "false",
+    // Without a vote floor, "highest rated" returns obscure titles with a
+    // single 10/10 vote. 200 is TMDB's own threshold for its top-rated list.
+    "vote_count.gte": sort === "rating" ? "200" : "25",
+    ...(dates && {
+      "primary_release_date.gte": dates[0],
+      "primary_release_date.lte": dates[1],
+    }),
+  };
+
+  const data = await fetchFromTmdb("/discover/movie", {
+    query,
+    revalidate: 3600,
+  });
+  return normalizeList(data, safePage);
 }
 
-// Fetch the current week's trending movies (used on the home page)
+/** This week's trending movies — the home page hero and first rail. */
 export async function getTrendingMovies(page = 1) {
+  const safePage = Math.max(1, Number(page) || 1);
   const data = await fetchFromTmdb("/trending/movie/week", {
-    query: { page },
-    revalidate: 300,
+    query: { page: String(safePage) },
+    revalidate: 3600,
   });
-  return {
-    results: data.results || [],
-    totalPages: Math.min(data.total_pages || 1, 500),
-    currentPage: page,
-  };
+  return normalizeList(data, safePage);
 }
 
-// Fetch TMDB top-rated movies list (used on the home page)
+/** TMDB's all-time top-rated list. */
 export async function getTopRatedMovies(page = 1) {
+  const safePage = Math.max(1, Number(page) || 1);
   const data = await fetchFromTmdb("/movie/top_rated", {
-    query: { page },
-    revalidate: 300,
-  });
-  return {
-    results: data.results || [],
-    totalPages: Math.min(data.total_pages || 1, 500),
-    currentPage: page,
-  };
-}
-
-export async function getTrendingMovieIds(limit = 20) {
-  const data = await fetchFromTmdb("/trending/movie/week", {
+    query: { page: String(safePage) },
     revalidate: 86400,
   });
-  return (data.results || []).slice(0, limit).map((movie) => String(movie.id));
+  return normalizeList(data, safePage);
 }
 
-export async function searchMovies(query) {
-  if (!query?.trim()) {
+/** Movies currently in cinemas. */
+export async function getNowPlayingMovies(page = 1) {
+  const safePage = Math.max(1, Number(page) || 1);
+  const data = await fetchFromTmdb("/movie/now_playing", {
+    query: { page: String(safePage), region: "US" },
+    revalidate: 21600,
+  });
+  return normalizeList(data, safePage);
+}
+
+/**
+ * Full movie record in a single request.
+ *
+ * append_to_response bundles credits, videos, similar titles and release
+ * certifications into one round-trip instead of five — which matters both for
+ * TTFB and for staying inside TMDB's rate limit during static generation.
+ */
+export async function getMovieById(id) {
+  return fetchFromTmdb(`/movie/${id}`, {
+    query: {
+      append_to_response: "credits,videos,similar,release_dates,external_ids",
+    },
+    revalidate: 86400,
+  });
+}
+
+/** Movie ids to pre-render at build time (ISR seeds the rest on demand). */
+export async function getTrendingMovieIds(limit = 40) {
+  try {
+    const [week, top] = await Promise.all([
+      fetchFromTmdb("/trending/movie/week", { revalidate: 86400 }),
+      fetchFromTmdb("/movie/top_rated", { revalidate: 86400 }),
+    ]);
+    const ids = [...(week.results || []), ...(top.results || [])].map((m) =>
+      String(m.id),
+    );
+    return [...new Set(ids)].slice(0, limit);
+  } catch {
+    // Never fail the build over a pre-render list — fall back to pure SSR.
     return [];
   }
+}
 
+export async function searchMovies(query, page = 1) {
+  if (!query?.trim()) {
+    return { results: [], totalPages: 1, totalResults: 0, currentPage: 1 };
+  }
+
+  const safePage = Math.max(1, Number(page) || 1);
   const data = await fetchFromTmdb("/search/movie", {
     query: {
       query,
-      page: "1",
+      page: String(safePage),
       include_adult: "false",
     },
     noStore: true,
   });
 
-  return data.results || [];
+  return normalizeList(data, safePage);
+}
+
+/* ------------------------------------------------------------------ */
+/* Presentation helpers — shared by cards, detail pages and JSON-LD    */
+/* ------------------------------------------------------------------ */
+
+export function movieTitle(movie) {
+  return movie?.title || movie?.name || "Untitled";
+}
+
+export function movieYear(movie) {
+  return (
+    (movie?.release_date || movie?.first_air_date || "").slice(0, 4) || null
+  );
+}
+
+export function movieRating(movie) {
+  return movie?.vote_average ? Number(movie.vote_average).toFixed(1) : null;
+}
+
+/** 148 -> "2h 28m" */
+export function formatRuntime(minutes) {
+  if (!minutes) return null;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h ? `${h}h${m ? ` ${m}m` : ""}` : `${m}m`;
+}
+
+/** "2014-11-05" -> "5 November 2014" */
+export function formatDate(iso) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+export function formatMoney(amount) {
+  if (!amount || amount < 1000) return null;
+  const formatted = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(amount);
+  // Compact notation emits "$165.0M" for round figures. Intl's
+  // trailingZeroDisplay option would handle this but has patchy support, so
+  // strip the redundant ".0" directly.
+  return formatted.replace(/\.0(?=[A-Z]?$)/, "");
+}
+
+/** US content rating (PG-13, R…) from the appended release_dates payload. */
+export function certification(movie) {
+  const us = movie?.release_dates?.results?.find((r) => r.iso_3166_1 === "US");
+  const cert = us?.release_dates?.find((r) => r.certification)?.certification;
+  return cert || null;
+}
+
+export function directors(movie) {
+  return (movie?.credits?.crew || [])
+    .filter((c) => c.job === "Director")
+    .map((c) => c.name);
+}
+
+export function writers(movie) {
+  const jobs = new Set(["Screenplay", "Writer", "Story"]);
+  const names = (movie?.credits?.crew || [])
+    .filter((c) => jobs.has(c.job))
+    .map((c) => c.name);
+  return [...new Set(names)];
+}
+
+export function topCast(movie, limit = 10) {
+  return (movie?.credits?.cast || []).slice(0, limit);
+}
+
+/** Best available YouTube trailer key, if TMDB has one. */
+export function trailerKey(movie) {
+  const videos = movie?.videos?.results || [];
+  const pick =
+    videos.find(
+      (v) => v.site === "YouTube" && v.type === "Trailer" && v.official,
+    ) ||
+    videos.find((v) => v.site === "YouTube" && v.type === "Trailer") ||
+    videos.find((v) => v.site === "YouTube" && v.type === "Teaser");
+  return pick?.key ?? null;
 }
